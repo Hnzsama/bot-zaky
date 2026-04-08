@@ -13,9 +13,8 @@ const CONFIG = {
   usePairingCode: true
 };
 
-// JID dan LID kamu secara eksplisit dari log sebelumnya
+// JID Owner Eksplisit
 const OWNER_JID = "6287755893014@s.whatsapp.net";
-const OWNER_LID = "276252363632838@lid";
 
 async function startSock() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
@@ -25,7 +24,11 @@ async function startSock() {
     version,
     auth: state,
     printQRInTerminal: !CONFIG.usePairingCode,
-    logger: require('pino')({ level: 'silent' })
+    logger: require('pino')({ level: 'silent' }),
+    // Tambahkan ini untuk memastikan sinkronisasi pesan lebih baik
+    syncFullHistory: true,
+    // Pastikan bot bisa membaca pesan dari diri sendiri
+    markOnlineOnConnect: true 
   });
 
   if (CONFIG.usePairingCode && !sock.authState.creds.registered) {
@@ -47,17 +50,19 @@ async function startSock() {
       const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
       if (shouldReconnect) startSock();
     } else if (connection === 'open') {
-      console.log('Bot is now connected');
+      console.log('Bot is now connected - Login sebagai:', OWNER_JID);
     }
   });
 
-  sock.ev.on('messages.upsert', async ({ messages }: any) => {
+  sock.ev.on('messages.upsert', async ({ messages, type }: any) => {
+    // Kita pantau semua pesan yang masuk (notify maupun append)
     for (const msg of messages) {
       if (!msg.message) continue;
 
-      const from = msg.key.remoteJid!;
-      // Ambil sender dan bersihkan formatnya (menghilangkan :1, :2 dll)
-      const sender = jidNormalizedUser(msg.key.participant || msg.key.remoteJid || "");
+      // Ambil sender. Jika 'fromMe' true, berarti pengirimnya adalah kita sendiri
+      const isFromMe = msg.key.fromMe;
+      const rawSender = msg.key.participant || msg.key.remoteJid || "";
+      const cleanSender = jidNormalizedUser(rawSender);
 
       let text = "";
       if (msg.message.conversation) text = msg.message.conversation;
@@ -65,29 +70,29 @@ async function startSock() {
 
       if (!text) continue;
 
-      // Filter: Hanya proses perintah "ulang"
+      // Log setiap teks yang masuk untuk mempermudah tracking di terminal
+      console.log(`[INCOMING] From: ${cleanSender} | Self: ${isFromMe} | Text: ${text}`);
+
       if (text.toLowerCase() === "ulang") {
-        // Log Debug untuk memastikan siapa yang mengirim
-        console.log(`[DEBUG] Perintah 'ulang' terdeteksi dari: ${sender}`);
+        
+        // Pengecekan Owner: Jika pesan berasal dari kita sendiri (fromMe) 
+        // ATAU sender ID cocok dengan OWNER_JID
+        const isOwner = isFromMe || cleanSender === OWNER_JID;
 
-        // Cek apakah sender adalah JID atau LID owner
-        const isOwner = (sender === OWNER_JID || sender === OWNER_LID);
+        if (!isOwner) continue;
 
-        if (!isOwner) {
-          console.log(`[DEBUG] Akses ditolak untuk: ${sender}`);
-          continue; 
-        }
+        console.log(`[PROCESS] Perintah 'ulang' tervalidasi. Mencari media...`);
 
         const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
         if (!quotedMsg) {
-          console.log(`[DEBUG] Perintah 'ulang' diketik tanpa me-reply media.`);
+          console.log(`[DEBUG] Gagal: Tidak ada media yang di-reply.`);
           continue;
         }
 
         let mediaMessage: any;
         let mediaType: any;
 
-        // Cek View Once atau Media Biasa
+        // Support View Once
         const viewOnce = quotedMsg.viewOnceMessageV2?.message || quotedMsg.viewOnceMessage?.message;
         const targetMsg = viewOnce || quotedMsg;
 
@@ -99,14 +104,15 @@ async function startSock() {
 
         if (mediaMessage && mediaType) {
           try {
-            console.log(`[PROCESS] Mendownload media tipe ${mediaType}...`);
+            console.log(`[DOWNLOAD] Sedang mengunduh ${mediaType}...`);
             const stream = await downloadContentFromMessage(mediaMessage, mediaType);
             let buffer = Buffer.from([]);
             for await (const chunk of stream) {
               buffer = Buffer.concat([buffer, chunk]);
             }
 
-            // Selalu kirim ke JID Owner (pribadi)
+            console.log(`[SEND] Mengirim ke ${OWNER_JID}...`);
+            
             if (mediaType === 'image') {
               await sock.sendMessage(OWNER_JID, { image: buffer, caption: "Extract Berhasil" });
             } else if (mediaType === 'video') {
@@ -119,9 +125,9 @@ async function startSock() {
               await sock.sendMessage(OWNER_JID, { document: buffer, mimetype: mediaMessage.mimetype, fileName: mediaMessage.fileName || 'file' });
             }
 
-            console.log(`[SUCCESS] Media berhasil dikirim ke nomor owner (${OWNER_JID})`);
+            console.log(`[SUCCESS] Media berhasil dikirim.`);
           } catch (err) {
-            console.error("[ERROR] Gagal saat mengekstrak media:", err);
+            console.error("[ERROR] Gagal proses media:", err);
           }
         }
       }
