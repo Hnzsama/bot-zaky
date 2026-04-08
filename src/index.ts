@@ -14,7 +14,7 @@ const CONFIG = {
 };
 
 // JID dan LID kamu secara eksplisit dari log sebelumnya
-const OWNER_JID = "6285159884234@s.whatsapp.net";
+const OWNER_JID = "6287755893014@s.whatsapp.net";
 const OWNER_LID = "276252363632838@lid";
 
 async function startSock() {
