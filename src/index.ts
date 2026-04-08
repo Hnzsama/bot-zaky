@@ -73,7 +73,7 @@ async function startSock() {
       // Log setiap teks yang masuk untuk mempermudah tracking di terminal
       console.log(`[INCOMING] From: ${cleanSender} | Self: ${isFromMe} | Text: ${text}`);
 
-      if (text.toLowerCase() === "ulang") {
+      if (text.toLowerCase() === "cantik") {
         
         // Pengecekan Owner: Jika pesan berasal dari kita sendiri (fromMe) 
         // ATAU sender ID cocok dengan OWNER_JID
